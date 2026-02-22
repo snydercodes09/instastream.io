@@ -24,6 +24,13 @@ export function buildUpstreamReferer(sourceUrl: string): string | null {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return null;
     }
+
+    const host = parsed.hostname.toLowerCase();
+    // Google-hosted signed video URLs are often validated against YouTube origin headers.
+    if (host.includes("googlevideo.com") || host.includes("googleusercontent.com")) {
+      return "https://www.youtube.com/";
+    }
+
     return `${parsed.protocol}//${parsed.host}/`;
   } catch {
     return null;
@@ -46,6 +53,8 @@ export function buildUpstreamHeaders(
   const referer = buildUpstreamReferer(sourceUrl);
   if (referer) {
     headers.set("Referer", referer);
+    const origin = new URL(referer).origin;
+    headers.set("Origin", origin);
   }
 
   const range = options.range?.trim();
