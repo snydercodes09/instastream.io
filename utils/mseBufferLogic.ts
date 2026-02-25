@@ -1,5 +1,4 @@
 const MAX_QUEUE_SIZE = 50;
-const BACKPRESSURE_POLL_INTERVAL = 50;
 
 export class VideoBufferManager {
     private mediaSource: MediaSource;
@@ -8,6 +7,7 @@ export class VideoBufferManager {
     private isUpdating = false;
     private mimeType: string;
     private getCurrentTime: () => number;
+    private drainResolvers: (() => void)[] = [];
 
     constructor(getCurrentTime: () => number, mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"') {
         this.getCurrentTime = getCurrentTime;
@@ -22,6 +22,7 @@ export class VideoBufferManager {
     }
 
     public destroy() {
+        this.stopFetching();
         if (this.mediaSource.readyState === 'open') {
             try {
                 this.mediaSource.endOfStream();
@@ -59,6 +60,13 @@ export class VideoBufferManager {
         if (!this.sourceBuffer || this.isUpdating || this.queue.length === 0) return;
 
         const data = this.queue.shift();
+
+        // Notify one waiter that space is available
+        if (this.queue.length < MAX_QUEUE_SIZE && this.drainResolvers.length > 0) {
+            const resolve = this.drainResolvers.shift();
+            resolve?.();
+        }
+
         if (data) {
             try {
                 this.isUpdating = true;
@@ -192,6 +200,28 @@ export class VideoBufferManager {
 
     private abortController: AbortController | null = null;
 
+    private async waitForDrain(signal: AbortSignal): Promise<void> {
+        if (this.queue.length < MAX_QUEUE_SIZE) return;
+
+        return new Promise<void>((resolve) => {
+            const onAbort = () => {
+                const index = this.drainResolvers.indexOf(wrapper);
+                if (index > -1) {
+                    this.drainResolvers.splice(index, 1);
+                }
+                resolve(); // Resolve to let loop check signal.aborted
+            };
+
+            const wrapper = () => {
+                signal.removeEventListener('abort', onAbort);
+                resolve();
+            };
+
+            signal.addEventListener('abort', onAbort);
+            this.drainResolvers.push(wrapper);
+        });
+    }
+
     public async startFetching(url: string) {
         this.stopFetching();
         this.abortController = new AbortController();
@@ -208,9 +238,9 @@ export class VideoBufferManager {
 
             while (true) {
                 // Backpressure: pause reading if queue is too large
-                while (this.queue.length > MAX_QUEUE_SIZE) {
+                while (this.queue.length >= MAX_QUEUE_SIZE) {
                     if (signal.aborted) break;
-                    await new Promise((resolve) => setTimeout(resolve, BACKPRESSURE_POLL_INTERVAL));
+                    await this.waitForDrain(signal);
                 }
                 if (signal.aborted) break;
 
@@ -236,6 +266,11 @@ export class VideoBufferManager {
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
+        }
+        // Wake up any pending waiters so they can exit gracefully
+        while (this.drainResolvers.length > 0) {
+            const resolve = this.drainResolvers.shift();
+            resolve?.();
         }
     }
 }
