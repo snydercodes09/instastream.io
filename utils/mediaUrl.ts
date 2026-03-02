@@ -4,6 +4,20 @@ const WRAPPER_HOSTS = new Set(["video-seed.dev", "www.video-seed.dev"]);
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const PROBE_RANGE = "bytes=0-1023";
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 500;
+
+interface CachedProbeResult {
+  result: MediaProbeResult;
+  timestamp: number;
+}
+
+const probeCache = new Map<string, CachedProbeResult>();
+
+export function clearMediaValidationCache() {
+  probeCache.clear();
+}
+
 export type MediaValidationErrorCode =
   | "INVALID_URL"
   | "WRAPPER_URL_MISSING_INNER_URL"
@@ -191,6 +205,13 @@ export async function assertMediaLikeSource(
   url: string,
   options: AssertMediaLikeSourceOptions = {},
 ): Promise<MediaProbeResult> {
+  const now = Date.now();
+  const cached = probeCache.get(url);
+
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const { signal, cleanup } = createTimedSignal(timeoutMs, options.signal);
 
@@ -231,11 +252,22 @@ export async function assertMediaLikeSource(
       );
     }
 
-    return {
+    const result = {
       contentType,
       contentLength,
       acceptRanges,
     };
+
+    if (probeCache.size >= MAX_CACHE_SIZE) {
+      // Very simple FIFO/LRU eviction: remove the first key
+      const firstKey = probeCache.keys().next().value;
+      if (firstKey) {
+        probeCache.delete(firstKey);
+      }
+    }
+    probeCache.set(url, { result, timestamp: Date.now() });
+
+    return result;
   } catch (error: unknown) {
     if (error instanceof MediaValidationError) {
       throw error;
