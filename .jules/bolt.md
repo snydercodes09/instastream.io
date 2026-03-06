@@ -1,0 +1,4 @@
+
+## 2024-05-18 - [React.memo in high-frequency update components]
+**Learning:** In KMPlayer, the `<Controls />` component re-renders multiple times per second due to the `currentTime` updating constantly. Since `Controls` renders many static child controls (play buttons, volume slider, etc.), it's a prime target for `React.memo()`. However, `React.memo()` is completely ineffective if the parent component passes down inline arrow functions as callbacks (e.g. `onSubtitleTrackChange={(index) => ...}`), which breaks referential equality on every tick.
+**Action:** When using `React.memo()` to prevent re-renders on components that receive frequent prop updates from parents (like a video player UI), absolutely all callback props must be wrapped in `useCallback` at the parent level to maintain referential stability.
