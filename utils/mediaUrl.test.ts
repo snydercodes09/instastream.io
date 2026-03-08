@@ -8,11 +8,12 @@ mock.module("@/utils/upstreamFetch", () => {
   };
 });
 
-import { assertMediaLikeSource, MediaValidationError } from "./mediaUrl";
+import { assertMediaLikeSource, MediaValidationError, clearMediaValidationCache } from "./mediaUrl";
 
 describe("assertMediaLikeSource", () => {
   beforeEach(() => {
     mockFetchUpstream.mockReset();
+    clearMediaValidationCache();
   });
 
   it("should return valid probe result for media content", async () => {
@@ -39,14 +40,35 @@ describe("assertMediaLikeSource", () => {
     expect(options.signal).toBeDefined();
   });
 
+  it("should cache successful probe results and avoid subsequent network requests", async () => {
+    mockFetchUpstream.mockResolvedValue(new Response(new Uint8Array([0x00, 0x01, 0x02]), {
+      headers: {
+        "content-type": "video/mp4",
+        "content-length": "1024",
+        "accept-ranges": "bytes",
+      },
+    }));
+
+    const url = "http://example.com/cached.mp4";
+
+    const result1 = await assertMediaLikeSource(url);
+    expect(result1.contentType).toBe("video/mp4");
+    expect(mockFetchUpstream).toHaveBeenCalledTimes(1);
+
+    const result2 = await assertMediaLikeSource(url);
+    expect(result2.contentType).toBe("video/mp4");
+    expect(result2).toEqual(result1); // Should be exactly the same
+    expect(mockFetchUpstream).toHaveBeenCalledTimes(1); // Network request count should not increase
+  });
+
   it("should throw UPSTREAM_UNAVAILABLE if response is not ok", async () => {
     mockFetchUpstream.mockResolvedValue(new Response(null, { status: 404, statusText: "Not Found" }));
 
     try {
       await assertMediaLikeSource("http://example.com/missing.mp4");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("UPSTREAM_UNAVAILABLE");
         expect((error as MediaValidationError).status).toBe(502);
@@ -61,8 +83,8 @@ describe("assertMediaLikeSource", () => {
     try {
       await assertMediaLikeSource("http://example.com/empty");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("SOURCE_NOT_MEDIA");
     }
@@ -76,8 +98,8 @@ describe("assertMediaLikeSource", () => {
     try {
       await assertMediaLikeSource("http://example.com/page.html");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("SOURCE_NOT_MEDIA");
     }
@@ -92,8 +114,8 @@ describe("assertMediaLikeSource", () => {
     try {
       await assertMediaLikeSource("http://example.com/fake.bin");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("SOURCE_NOT_MEDIA");
     }
@@ -107,8 +129,8 @@ describe("assertMediaLikeSource", () => {
     try {
       await assertMediaLikeSource("http://example.com/timeout");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("UPSTREAM_TIMEOUT");
     }
@@ -120,8 +142,8 @@ describe("assertMediaLikeSource", () => {
     try {
       await assertMediaLikeSource("http://example.com/error");
       throw new Error("Expected to throw MediaValidationError");
-    } catch (error: any) {
-        if (error.message === "Expected to throw MediaValidationError") throw error;
+    } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Expected to throw MediaValidationError") throw error;
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("UPSTREAM_UNAVAILABLE");
     }
