@@ -80,7 +80,7 @@ function formatRemaining(current: number, total: number): string {
 
 /* ─── component ─── */
 
-const Controls: React.FC<ControlsProps> = ({
+const Controls: React.FC<ControlsProps> = React.memo(({
     isPlaying,
     onPlayPause,
     currentTime,
@@ -533,6 +533,8 @@ const Controls: React.FC<ControlsProps> = ({
             </div>
         </div>
     );
-};
+});
+
+Controls.displayName = 'Controls';
 
 export default Controls;
