@@ -97,7 +97,7 @@ describe("fetchUpstreamWithRedirects", () => {
         await fetchUpstreamWithRedirects("http://source.com/");
         throw new Error("Should have thrown");
     } catch (e: any) {
-        expect(e.message).toBe("Upstream redirect uses an unsupported protocol.");
+        expect(e.message).toBe("Upstream redirect location is unsafe or unsupported.");
     }
   });
 
@@ -150,7 +150,7 @@ describe("fetchUpstreamWithRedirects", () => {
         await fetchUpstreamWithRedirects("ftp://source.com/");
         throw new Error("Should have thrown");
     } catch (e: any) {
-        expect(e.message).toBe("Only HTTP(S) upstream URLs are supported.");
+        expect(e.message).toBe("Only public HTTP(S) upstream URLs are supported.");
     }
   });
 
