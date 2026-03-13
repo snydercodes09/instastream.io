@@ -1,0 +1,3 @@
+## 2024-05-18 - [Optimize sqlite write locking for high frequency progress streams]
+**Learning:** In `app/api/download-stream/route.ts`, high frequency file downloads triggered rapid, synchronous DB writes via `better-sqlite3`. While native SQLite is fast, doing a separate parsing/execution cycle for each write during a high-speed HTTP chunk read loop creates lock contention and starves the event loop. This leads to buffering bottlenecks and stalls.
+**Action:** When saving frequent progress updates to SQLite, debounce and coalesce the writes in a background queue using `setImmediate` or `setTimeout`. Also, extract `db.prepare()` out of the loop into module-level variables so SQLite queries are only parsed once at startup.
