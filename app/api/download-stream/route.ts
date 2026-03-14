@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
-import { PassThrough } from 'stream';
 
 // Helper to update DB status
 function updateStatus(id: number, status: string, downloaded: number) {
@@ -104,7 +103,6 @@ export async function GET(req: NextRequest) {
         // Instead, we use Node.js PassThrough if possible, or just read chunks and write to both.
 
         const fileStream = fs.createWriteStream(video.filepath);
-        const passThrough = new PassThrough();
 
         // Convert web stream to node stream to use .pipe()? 
         // Or manually read reader and write to both. Manual is safer for edge environment compat (though we are nodejs here).
@@ -127,7 +125,10 @@ export async function GET(req: NextRequest) {
                         }
 
                         // 1. Write to file
-                        fileStream.write(value);
+                        const canContinue = fileStream.write(value);
+                        if (!canContinue) {
+                            await new Promise(resolve => fileStream.once('drain', resolve));
+                        }
                         bytesWritten += value.length;
 
                         // Throttle DB updates (every 1MB roughly?)

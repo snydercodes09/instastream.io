@@ -9,15 +9,6 @@ function isRedirectStatus(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
-function isHttpUrl(rawUrl: string): boolean {
-  try {
-    const parsed = new URL(rawUrl);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 export function buildUpstreamReferer(sourceUrl: string): string | null {
   try {
     const parsed = new URL(sourceUrl);
