@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
-import { PassThrough } from 'stream';
 
 // Helper to update DB status
 function updateStatus(id: number, status: string, downloaded: number) {
@@ -104,7 +103,6 @@ export async function GET(req: NextRequest) {
         // Instead, we use Node.js PassThrough if possible, or just read chunks and write to both.
 
         const fileStream = fs.createWriteStream(video.filepath);
-        const passThrough = new PassThrough();
 
         // Convert web stream to node stream to use .pipe()? 
         // Or manually read reader and write to both. Manual is safer for edge environment compat (though we are nodejs here).
@@ -150,7 +148,6 @@ export async function GET(req: NextRequest) {
                 // Client disconnected
                 // We MIGHT want to continue downloading in background?
                 // For now, let's stop to save bandwidth.
-                console.log('Client disconnected, stopping download.');
                 reader.cancel();
                 fileStream.end();
                 // Mark as pending so we can maybe resume or restart later
