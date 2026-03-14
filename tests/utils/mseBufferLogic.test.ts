@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { VideoBufferManager } from "../../utils/mseBufferLogic";
 
@@ -28,11 +31,11 @@ class MockTimeRanges {
 class MockSourceBuffer {
     public updating: boolean = false;
     public buffered: MockTimeRanges = new MockTimeRanges();
-    public listeners: Record<string, Function[]> = {};
+    public listeners: Record<string, ((...args: any[]) => void)[]> = {};
     public appendBufferMock = mock((data: any) => {});
     public removeMock = mock((start: number, end: number) => {});
 
-    addEventListener(event: string, callback: Function) {
+    addEventListener(event: string, callback: (...args: any[]) => void) {
         if (!this.listeners[event]) this.listeners[event] = [];
         this.listeners[event].push(callback);
     }
@@ -60,7 +63,7 @@ class MockMediaSource {
     public readyState: string = "closed";
     public activeSourceBuffers: MockSourceBuffer[] = [];
     public sourceBuffers: MockSourceBuffer[] = [];
-    public listeners: Record<string, Function[]> = {};
+    public listeners: Record<string, ((...args: any[]) => void)[]> = {};
     public addSourceBufferMock = mock((mime: string) => {
         const sb = new MockSourceBuffer();
         this.sourceBuffers.push(sb);
@@ -72,7 +75,7 @@ class MockMediaSource {
         // Simulate immediate open for simplicity in some tests, or let test control it
     }
 
-    addEventListener(event: string, callback: Function) {
+    addEventListener(event: string, callback: (...args: any[]) => void) {
         if (!this.listeners[event]) this.listeners[event] = [];
         this.listeners[event].push(callback);
     }
@@ -297,7 +300,7 @@ describe("VideoBufferManager", () => {
     it("should retry with setTimeout if all pruning fails", async () => {
         // We need to mock setTimeout to test this synchronously or use async/await
         const originalSetTimeout = global.setTimeout;
-        const setTimeoutMock = mock((cb, delay) => {
+        const setTimeoutMock = mock((cb: any, delay: any) => {
             cb(); // Execute immediately
             return 0 as any;
         });

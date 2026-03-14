@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 
 import { VideoBufferManager } from './mseBufferLogic';
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
