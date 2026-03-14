@@ -1,0 +1,3 @@
+## 2024-05-15 - [Download Stream DB Blocking & Memory Bloat]
+**Learning:** In Next.js API routes with high-throughput streams (like `app/api/download-stream/route.ts`), failing to await the `drain` event on `fs.createWriteStream` leads to unbounded memory bloat. Also, executing synchronous SQLite (`better-sqlite3`) writes per chunk blocks the Node.js event loop, crippling throughput.
+**Action:** Always check `fileStream.write(chunk)` return value and await `fileStream.once('drain', ...)` if false. Use a coalescing background queue with `setImmediate` for synchronous SQLite writes on hot paths to free the event loop.
