@@ -224,9 +224,7 @@ export class VideoBufferManager {
                 }
             }
         } catch (e) {
-            if (signal.aborted) {
-                console.log('Fetching aborted');
-            } else {
+            if (!signal.aborted) {
                 console.error('Error fetching stream:', e);
             }
         }
