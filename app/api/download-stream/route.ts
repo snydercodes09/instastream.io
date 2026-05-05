@@ -3,6 +3,15 @@ import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
 import { PassThrough } from 'stream';
+import {
+    assertMediaLikeSource,
+    MediaValidationError,
+    normalizeMediaUrl,
+} from '@/utils/mediaUrl';
+import { fetchUpstreamWithRedirects } from '@/utils/upstreamFetch';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // Helper to update DB status
 function updateStatus(id: number, status: string, downloaded: number) {
@@ -19,10 +28,20 @@ export async function GET(req: NextRequest) {
         return new NextResponse('Missing URL', { status: 400 });
     }
 
+    let normalizedUrl: string;
+    try {
+        normalizedUrl = normalizeMediaUrl(url).normalizedUrl;
+    } catch (error: unknown) {
+        if (error instanceof MediaValidationError) {
+            return new NextResponse(error.message, { status: error.status });
+        }
+        return new NextResponse('Invalid URL', { status: 400 });
+    }
+
     await StorageManager.ensureDirectory();
 
     // 1. Check DB for existing record
-    let video = db.prepare('SELECT * FROM videos WHERE url = ?').get(url) as VideoRecord | undefined;
+    let video = db.prepare('SELECT * FROM videos WHERE url = ?').get(normalizedUrl) as VideoRecord | undefined;
 
     // 2. If completely downloaded, serve from disk
     if (video && video.status === 'completed' && await StorageManager.fileExists(video.filename)) {
@@ -67,13 +86,13 @@ export async function GET(req: NextRequest) {
 
     // Create new record if needed
     if (!video) {
-        const filename = StorageManager.generateFilename(url);
+        const filename = StorageManager.generateFilename(normalizedUrl);
         const info = db.prepare('INSERT INTO videos (url, filename, filepath, status) VALUES (?, ?, ?, ?)')
-            .run(url, filename, StorageManager.getFilePath(filename), 'downloading');
+            .run(normalizedUrl, filename, StorageManager.getFilePath(filename), 'downloading');
 
         video = {
             id: info.lastInsertRowid as number,
-            url,
+            url: normalizedUrl,
             filename,
             filepath: StorageManager.getFilePath(filename),
             size: 0,
@@ -88,7 +107,15 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-        const upstreamRes = await fetch(url);
+        // Validate source is media-like
+        await assertMediaLikeSource(normalizedUrl, { signal: req.signal });
+
+        const upstreamRes = await fetchUpstreamWithRedirects(normalizedUrl, {
+            method: 'GET',
+            cache: 'no-store',
+            signal: req.signal,
+        });
+
         if (!upstreamRes.ok || !upstreamRes.body) {
             db.prepare('UPDATE videos SET status = ? WHERE id = ?').run('error', video.id);
             return new NextResponse('Upstream Error', { status: upstreamRes.status });
