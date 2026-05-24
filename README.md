@@ -5,7 +5,7 @@ A web-based video streaming application that lets you instantly stream large vid
 
 ## Features
 
-- **Direct URL Streaming** — Paste any direct video URL (MP4, MKV, etc.) and start watching immediately.
+- **Direct URL Streaming** — Paste any direct video URL (MP4, MKV, etc., Definitely not pirated ones - iykyk😅) and start watching immediately.
 - **Smart Playback Pipeline** — Automatically tries Direct Play → Proxy → Server-side Transcoding, falling back gracefully when needed.
 - **Custom Video Player** — A KMPlayer-inspired UI with no default browser controls.
 - **Keyboard Shortcuts** — Desktop-style controls: Space (play/pause), Arrow keys (seek), Shift+/- (speed), M (mute), F (fullscreen).
