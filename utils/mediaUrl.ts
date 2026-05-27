@@ -4,6 +4,20 @@ const WRAPPER_HOSTS = new Set(["video-seed.dev", "www.video-seed.dev"]);
 const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 const PROBE_RANGE = "bytes=0-1023";
 
+const CACHE_TTL_MS = 300_000; // 5 minutes
+const MAX_CACHE_SIZE = 500;
+
+interface CacheEntry {
+  result: MediaProbeResult;
+  timestamp: number;
+}
+
+const mediaValidationCache = new Map<string, CacheEntry>();
+
+export function clearMediaValidationCache() {
+  mediaValidationCache.clear();
+}
+
 export type MediaValidationErrorCode =
   | "INVALID_URL"
   | "WRAPPER_URL_MISSING_INNER_URL"
@@ -191,6 +205,12 @@ export async function assertMediaLikeSource(
   url: string,
   options: AssertMediaLikeSourceOptions = {},
 ): Promise<MediaProbeResult> {
+  const now = Date.now();
+  const cached = mediaValidationCache.get(url);
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const { signal, cleanup } = createTimedSignal(timeoutMs, options.signal);
 
@@ -231,11 +251,22 @@ export async function assertMediaLikeSource(
       );
     }
 
-    return {
+    const result = {
       contentType,
       contentLength,
       acceptRanges,
     };
+
+    if (mediaValidationCache.size >= MAX_CACHE_SIZE) {
+      // Simple eviction: remove the first entry
+      const firstKey = mediaValidationCache.keys().next().value;
+      if (firstKey !== undefined) {
+        mediaValidationCache.delete(firstKey);
+      }
+    }
+    mediaValidationCache.set(url, { result, timestamp: Date.now() });
+
+    return result;
   } catch (error: unknown) {
     if (error instanceof MediaValidationError) {
       throw error;
