@@ -218,6 +218,33 @@ const KMPlayer: React.FC<KMPlayerProps> = ({ srcUrl }) => {
         setShowSubtitleInput(prev => !prev);
     }, []);
 
+    const handleSubtitleTrackChange = useCallback((index: number | null) => {
+        setSelectedSubtitleIndex(index);
+        if (index !== null) {
+            // Force transcode mode if embedded subtitle is selected
+            setTranscodeRevision(prev => prev + 1);
+            setStatusMessage('Burning in subtitles...');
+            if (mode !== 'transcode') {
+                setMode('transcode');
+            }
+        } else if (mode === 'transcode' && selectedAudioIndex !== null) {
+            // If unselecting subs but still in transcode (e.g. for audio), just reload
+            setTranscodeRevision(prev => prev + 1);
+            setStatusMessage('Turning off subtitles...');
+        }
+    }, [mode, selectedAudioIndex]);
+
+    const handleAudioTrackChange = useCallback((index: number) => {
+        setSelectedAudioIndex(index);
+        if (mode === 'transcode') {
+            setTranscodeRevision(prev => prev + 1);
+            setStatusMessage('Switching audio track...');
+        } else {
+            setMode('transcode');
+            setStatusMessage('Switching audio track (requires transcode)...');
+        }
+    }, [mode]);
+
     const handleSubtitleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
@@ -823,31 +850,11 @@ const KMPlayer: React.FC<KMPlayerProps> = ({ srcUrl }) => {
                 hasSubtitles={!!subtitleUrl}
                 subtitleTracks={subtitleTracks}
                 selectedSubtitleIndex={selectedSubtitleIndex}
-                onSubtitleTrackChange={(index) => {
-                    setSelectedSubtitleIndex(index);
-                    if (index !== null) {
-                        // Force transcode mode if embedded subtitle is selected
-                        setTranscodeRevision(prev => prev + 1);
-                        setStatusMessage('Burning in subtitles...');
-                        if (mode !== 'transcode') {
-                            setMode('transcode');
-                        }
-                    } else if (mode === 'transcode' && selectedAudioIndex !== null) {
-                        // If unselecting subs but still in transcode (e.g. for audio), just reload
-                        setTranscodeRevision(prev => prev + 1);
-                        setStatusMessage('Turning off subtitles...');
-                    }
-                }}
+                onSubtitleTrackChange={handleSubtitleTrackChange}
                 isVisible={showControls}
                 audioTracks={audioTracks}
                 selectedAudioIndex={selectedAudioIndex}
-                onAudioTrackChange={(index) => {
-                    setSelectedAudioIndex(index);
-                    if (mode === 'transcode') {
-                        setTranscodeRevision(prev => prev + 1);
-                        setStatusMessage('Switching audio track...');
-                    }
-                }}
+                onAudioTrackChange={handleAudioTrackChange}
                 brightness={brightness}
                 contrast={contrast}
                 onBrightnessChange={setBrightness}
