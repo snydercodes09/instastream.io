@@ -1,4 +1,7 @@
-$ next dev
+
+> instanstream.io@0.1.0 dev
+> next dev
+
 ▲ Next.js 16.1.6 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
@@ -9,37 +12,36 @@ This information is used to shape Next.js' roadmap and prioritize features.
 You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
 https://nextjs.org/telemetry
 
-✓ Ready in 1098ms
+✓ Ready in 1688ms
 ○ Compiling / ...
- GET / 200 in 5.3s (compile: 5.0s, render: 353ms)
- GET / 200 in 109ms (compile: 6ms, render: 103ms)
-Probe error: Error: Cannot find ffprobe
-    at ignore-listed frames
- GET /api/media-info?url=https%3A%2F%2Fmedia.w3.org%2F2010%2F05%2Fsintel%2Ftrailer.mp4 500 in 1055ms (compile: 829ms, render: 226ms)
-Probe error: Error: Cannot find ffprobe
-    at <unknown> (utils/mediaProbe.ts:19:16)
+ GET / 200 in 6.0s (compile: 5.2s, render: 791ms)
+ GET /?url=https://github.com/Snyder9999/instastream.io/raw/main/public/sample.mp4 200 in 76ms (compile: 5ms, render: 71ms)
+ GET / 200 in 82ms (compile: 6ms, render: 76ms)
+ GET / 200 in 82ms (compile: 5ms, render: 77ms)
+ GET / 200 in 69ms (compile: 5ms, render: 64ms)
+Probe error: Error: Invalid input index
+    at <unknown> (utils/mediaProbe.ts:29:16)
     at new Promise (<anonymous>)
-    at probeMedia (utils/mediaProbe.ts:18:12)
-    at GET (app/api/media-info/route.ts:16:42)
-  17 | export function probeMedia(url: string): Promise<MediaProbeResult> {
-  18 |     return new Promise((resolve, reject) => {
-> 19 |         ffmpeg.ffprobe(url, (err, metadata) => {
+    at probeMedia (utils/mediaProbe.ts:19:12)
+    at GET (app/api/media-info/route.ts:21:42)
+  27 |         // options is correctly identified as the third argument.
+  28 |         // @ts-expect-error: fluent-ffmpeg types incorrectly require a number for the stream index argument
+> 29 |         ffmpeg.ffprobe(url, undefined, options, (err, metadata) => {
      |                ^
-  20 |             if (err) {
-  21 |                 reject(err);
-  22 |                 return;
- GET /api/media-info?url=https%3A%2F%2Fmedia.w3.org%2F2010%2F05%2Fsintel%2Ftrailer.mp4 500 in 352ms (compile: 11ms, render: 341ms)
- GET /api/download-stream?url=https%3A%2F%2Fmedia.w3.org%2F2010%2F05%2Fsintel%2Ftrailer.mp4 200 in 947ms (compile: 657ms, render: 290ms)
-Client disconnected, stopping download.
-Stream Error: TypeError: Invalid state: Controller is already closed
-    at Object.start (app/api/download-stream/route.ts:124:40)
-  122 |                             fileStream.end();
-  123 |                             updateStatus(video!.id, 'completed', bytesWritten);
-> 124 |                             controller.close();
-      |                                        ^
-  125 |                             break;
-  126 |                         }
-  127 | {
-  code: 'ERR_INVALID_STATE'
-}
- GET /api/download-stream?url=https%3A%2F%2Fmedia.w3.org%2F2010%2F05%2Fsintel%2Ftrailer.mp4 200 in 320ms (compile: 4ms, render: 317ms)
+  30 |             if (err) {
+  31 |                 reject(err);
+  32 |                 return;
+ GET /api/media-info?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmediaelement%2Fmediaelement-files%2Fmaster%2Fbig_buck_bunny.mp4 500 in 1146ms (compile: 672ms, render: 475ms)
+Probe error: Error: Invalid input index
+    at <unknown> (utils/mediaProbe.ts:29:16)
+    at new Promise (<anonymous>)
+    at probeMedia (utils/mediaProbe.ts:19:12)
+    at GET (app/api/media-info/route.ts:21:42)
+  27 |         // options is correctly identified as the third argument.
+  28 |         // @ts-expect-error: fluent-ffmpeg types incorrectly require a number for the stream index argument
+> 29 |         ffmpeg.ffprobe(url, undefined, options, (err, metadata) => {
+     |                ^
+  30 |             if (err) {
+  31 |                 reject(err);
+  32 |                 return;
+ GET /api/media-info?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmediaelement%2Fmediaelement-files%2Fmaster%2Fbig_buck_bunny.mp4 500 in 195ms (compile: 18ms, render: 177ms)
