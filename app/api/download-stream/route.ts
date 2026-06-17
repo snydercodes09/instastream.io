@@ -2,14 +2,45 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
-import { PassThrough } from 'stream';
 
-// Helper to update DB status
-function updateStatus(id: number, status: string, downloaded: number) {
+// Pre-compiled statements for better performance
+const updateStatusStmt = db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?');
+const selectVideoStmt = db.prepare('SELECT * FROM videos WHERE url = ?');
+const insertVideoStmt = db.prepare('INSERT INTO videos (url, filename, filepath, status) VALUES (?, ?, ?, ?)');
+const resetStatusStmt = db.prepare('UPDATE videos SET status = ?, downloaded = 0 WHERE id = ?');
+const updateErrorStmt = db.prepare('UPDATE videos SET status = ? WHERE id = ?');
+const updateSizeStmt = db.prepare('UPDATE videos SET size = ? WHERE id = ?');
+
+// Background queue to prevent DB writes from blocking the stream
+const updateQueue = new Map<number, { status: string, downloaded: number }>();
+let isFlushing = false;
+
+function flushUpdateQueue() {
+    if (updateQueue.size === 0) {
+        isFlushing = false;
+        return;
+    }
+
     try {
-        db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?').run(status, downloaded, id);
+        db.transaction(() => {
+            for (const [id, data] of updateQueue.entries()) {
+                updateStatusStmt.run(data.status, data.downloaded, id);
+            }
+        })();
     } catch (e) {
-        console.error('DB Update Error:', e);
+        console.error('DB Batch Update Error:', e);
+    } finally {
+        updateQueue.clear();
+        isFlushing = false;
+    }
+}
+
+// Helper to update DB status efficiently
+function updateStatus(id: number, status: string, downloaded: number) {
+    updateQueue.set(id, { status, downloaded });
+    if (!isFlushing) {
+        isFlushing = true;
+        setImmediate(flushUpdateQueue);
     }
 }
 
@@ -22,7 +53,7 @@ export async function GET(req: NextRequest) {
     await StorageManager.ensureDirectory();
 
     // 1. Check DB for existing record
-    let video = db.prepare('SELECT * FROM videos WHERE url = ?').get(url) as VideoRecord | undefined;
+    let video = selectVideoStmt.get(url) as VideoRecord | undefined;
 
     // 2. If completely downloaded, serve from disk
     if (video && video.status === 'completed' && await StorageManager.fileExists(video.filename)) {
@@ -68,8 +99,7 @@ export async function GET(req: NextRequest) {
     // Create new record if needed
     if (!video) {
         const filename = StorageManager.generateFilename(url);
-        const info = db.prepare('INSERT INTO videos (url, filename, filepath, status) VALUES (?, ?, ?, ?)')
-            .run(url, filename, StorageManager.getFilePath(filename), 'downloading');
+        const info = insertVideoStmt.run(url, filename, StorageManager.getFilePath(filename), 'downloading');
 
         video = {
             id: info.lastInsertRowid as number,
@@ -84,19 +114,19 @@ export async function GET(req: NextRequest) {
         };
     } else {
         // Reset status to downloading if it was interrupted/error
-        db.prepare('UPDATE videos SET status = ?, downloaded = 0 WHERE id = ?').run('downloading', video.id);
+        resetStatusStmt.run('downloading', video.id);
     }
 
     try {
         const upstreamRes = await fetch(url);
         if (!upstreamRes.ok || !upstreamRes.body) {
-            db.prepare('UPDATE videos SET status = ? WHERE id = ?').run('error', video.id);
+            updateErrorStmt.run('error', video.id);
             return new NextResponse('Upstream Error', { status: upstreamRes.status });
         }
 
         const contentLength = upstreamRes.headers.get('content-length');
         if (contentLength) {
-            db.prepare('UPDATE videos SET size = ? WHERE id = ?').run(parseInt(contentLength), video.id);
+            updateSizeStmt.run(parseInt(contentLength), video.id);
         }
 
         // The Tee Logic
@@ -104,7 +134,6 @@ export async function GET(req: NextRequest) {
         // Instead, we use Node.js PassThrough if possible, or just read chunks and write to both.
 
         const fileStream = fs.createWriteStream(video.filepath);
-        const passThrough = new PassThrough();
 
         // Convert web stream to node stream to use .pipe()? 
         // Or manually read reader and write to both. Manual is safer for edge environment compat (though we are nodejs here).

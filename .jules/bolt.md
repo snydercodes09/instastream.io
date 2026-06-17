@@ -1,0 +1,8 @@
+
+## 2024-05-24 - [React Anti-Pattern: Memoizing Components with Continuously Updating Props]
+**Learning:** Wrapping a component like `Controls.tsx` in `React.memo` is completely ineffective if it receives props that change on every frame/tick, such as `currentTime`. The component will re-render anyway, and the memoization check just adds overhead.
+**Action:** When trying to optimize frequent re-renders caused by time/progress updates in media players, don't use `React.memo` on the top-level player controls. Instead, extract the frequently updating parts (like the progress bar or time text) into their own smaller components, or use refs and direct DOM manipulation for the progress updates if React's render cycle is too slow.
+
+## 2024-05-24 - [DB Statements inside high frequency events]
+**Learning:** In `app/api/download-stream/route.ts`, synchronous `better-sqlite3` statements like `db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?').run(...)` are invoked periodically during the stream reading process (every 1MB roughly). While better-sqlite3 is fast, preparing the statement inside the function on every update adds unnecessary overhead and `run` still performs synchronous I/O, which briefly blocks the Node.js event loop while streaming media.
+**Action:** When updating a DB repetitively in a loop or stream handler, precompile the statement outside the loop/function using `db.prepare()` once, and offload the actual execution to a background task (e.g., using `setImmediate` or an async queue) to avoid blocking the main event loop. This is crucial for maintaining smooth stream performance.
