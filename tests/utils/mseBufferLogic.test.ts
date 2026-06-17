@@ -98,7 +98,9 @@ class MockMediaSource {
 
 // Global Mocks setup
 global.MediaSource = MockMediaSource as any;
-global.URL = { createObjectURL: mock(() => "blob:test") } as any;
+
+// Safe URL mock that doesn't break URL constructor
+URL.createObjectURL = mock(() => "blob:test");
 
 // Mock DOMException
 class MockDOMException extends Error {
