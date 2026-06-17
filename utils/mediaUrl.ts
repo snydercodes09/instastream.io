@@ -124,6 +124,14 @@ async function readSampleBytes(response: Response, maxBytes: number): Promise<Ui
   return out;
 }
 
+const validationCache = new Map<string, { promise: Promise<MediaProbeResult>; expiresAt: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 500;
+
+export function clearMediaValidationCache() {
+  validationCache.clear();
+}
+
 export function normalizeMediaUrl(raw: string): NormalizeMediaUrlResult {
   let outer: URL;
   try {
@@ -191,73 +199,96 @@ export async function assertMediaLikeSource(
   url: string,
   options: AssertMediaLikeSourceOptions = {},
 ): Promise<MediaProbeResult> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
-  const { signal, cleanup } = createTimedSignal(timeoutMs, options.signal);
+  const now = Date.now();
+  const cached = validationCache.get(url);
 
-  try {
-    const response = await fetchUpstreamWithRedirects(url, {
-      method: "GET",
-      range: PROBE_RANGE,
-      cache: "no-store",
-      signal,
-    });
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
 
-    if (!response.ok) {
+  if (validationCache.size >= MAX_CACHE_SIZE) {
+    // Delete oldest entry (Map iterates in insertion order)
+    const firstKey = validationCache.keys().next().value;
+    if (firstKey !== undefined) {
+      validationCache.delete(firstKey);
+    }
+  }
+
+  const promise = (async () => {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
+    const { signal, cleanup } = createTimedSignal(timeoutMs, options.signal);
+
+    try {
+      const response = await fetchUpstreamWithRedirects(url, {
+        method: "GET",
+        range: PROBE_RANGE,
+        cache: "no-store",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new MediaValidationError(
+          "UPSTREAM_UNAVAILABLE",
+          `Upstream source responded with ${response.status} ${response.statusText}.`,
+          502,
+        );
+      }
+
+      const contentType = response.headers.get("content-type");
+      const contentLength = parseContentLength(response.headers.get("content-length"));
+      const acceptRanges = response.headers.get("accept-ranges");
+
+      const sampleBytes = await readSampleBytes(response, 512);
+      if (sampleBytes.length === 0 && contentLength === 0) {
+        throw new MediaValidationError(
+          "SOURCE_NOT_MEDIA",
+          "Source returned an empty payload and does not look like a media stream.",
+          422,
+        );
+      }
+
+      if (looksLikeHtml(contentType, sampleBytes)) {
+        throw new MediaValidationError(
+          "SOURCE_NOT_MEDIA",
+          "Source resolved to HTML/text instead of media bytes.",
+          422,
+        );
+      }
+
+      return {
+        contentType,
+        contentLength,
+        acceptRanges,
+      };
+    } catch (error: unknown) {
+      // Don't cache failures
+      validationCache.delete(url);
+
+      if (error instanceof MediaValidationError) {
+        throw error;
+      }
+
+      if (
+        (error instanceof DOMException && error.name === "AbortError") ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw new MediaValidationError(
+          "UPSTREAM_TIMEOUT",
+          "Timed out while probing source media.",
+          504,
+        );
+      }
+
       throw new MediaValidationError(
         "UPSTREAM_UNAVAILABLE",
-        `Upstream source responded with ${response.status} ${response.statusText}.`,
+        error instanceof Error ? error.message : "Failed to reach source media.",
         502,
       );
+    } finally {
+      cleanup();
     }
+  })();
 
-    const contentType = response.headers.get("content-type");
-    const contentLength = parseContentLength(response.headers.get("content-length"));
-    const acceptRanges = response.headers.get("accept-ranges");
-
-    const sampleBytes = await readSampleBytes(response, 512);
-    if (sampleBytes.length === 0 && contentLength === 0) {
-      throw new MediaValidationError(
-        "SOURCE_NOT_MEDIA",
-        "Source returned an empty payload and does not look like a media stream.",
-        422,
-      );
-    }
-
-    if (looksLikeHtml(contentType, sampleBytes)) {
-      throw new MediaValidationError(
-        "SOURCE_NOT_MEDIA",
-        "Source resolved to HTML/text instead of media bytes.",
-        422,
-      );
-    }
-
-    return {
-      contentType,
-      contentLength,
-      acceptRanges,
-    };
-  } catch (error: unknown) {
-    if (error instanceof MediaValidationError) {
-      throw error;
-    }
-
-    if (
-      (error instanceof DOMException && error.name === "AbortError") ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
-      throw new MediaValidationError(
-        "UPSTREAM_TIMEOUT",
-        "Timed out while probing source media.",
-        504,
-      );
-    }
-
-    throw new MediaValidationError(
-      "UPSTREAM_UNAVAILABLE",
-      error instanceof Error ? error.message : "Failed to reach source media.",
-      502,
-    );
-  } finally {
-    cleanup();
-  }
+  validationCache.set(url, { promise, expiresAt: now + CACHE_TTL_MS });
+  return promise;
 }

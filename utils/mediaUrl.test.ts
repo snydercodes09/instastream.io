@@ -8,11 +8,12 @@ mock.module("@/utils/upstreamFetch", () => {
   };
 });
 
-import { assertMediaLikeSource, MediaValidationError } from "./mediaUrl";
+import { assertMediaLikeSource, MediaValidationError, clearMediaValidationCache } from "./mediaUrl";
 
 describe("assertMediaLikeSource", () => {
   beforeEach(() => {
     mockFetchUpstream.mockReset();
+    clearMediaValidationCache();
   });
 
   it("should return valid probe result for media content", async () => {
@@ -125,5 +126,41 @@ describe("assertMediaLikeSource", () => {
         expect(error).toBeInstanceOf(MediaValidationError);
         expect((error as MediaValidationError).code).toBe("UPSTREAM_UNAVAILABLE");
     }
+  });
+
+  it("should cache successful validation results", async () => {
+    mockFetchUpstream.mockResolvedValueOnce(new Response(new Uint8Array([0x00, 0x01, 0x02]), {
+      headers: {
+        "content-type": "video/mp4",
+        "content-length": "1024",
+      },
+    }));
+
+    const result1 = await assertMediaLikeSource("http://example.com/cached.mp4");
+    const result2 = await assertMediaLikeSource("http://example.com/cached.mp4");
+
+    expect(result1).toEqual(result2);
+    // Fetch should only be called once because the second call used the cache
+    expect(mockFetchUpstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not cache failed validation results", async () => {
+    mockFetchUpstream.mockRejectedValueOnce(new Error("Network failure"));
+    mockFetchUpstream.mockResolvedValueOnce(new Response(new Uint8Array([0x00, 0x01, 0x02]), {
+        headers: {
+          "content-type": "video/mp4",
+          "content-length": "1024",
+        },
+      }));
+
+    try {
+        await assertMediaLikeSource("http://example.com/error-not-cached.mp4");
+    } catch {}
+
+    const result = await assertMediaLikeSource("http://example.com/error-not-cached.mp4");
+
+    expect(result.contentType).toBe("video/mp4");
+    // Fetch should be called twice since the first failed and wasn't cached
+    expect(mockFetchUpstream).toHaveBeenCalledTimes(2);
   });
 });
