@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { probeMedia } from '@/utils/mediaProbe';
+import { probeMedia, MediaProbeResult } from '@/utils/mediaProbe';
 import { normalizeMediaUrl, assertMediaLikeSource, MediaValidationError } from '@/utils/mediaUrl';
+import { SimpleLRUCache } from '@/utils/lruCache';
 
 export const dynamic = 'force-dynamic';
+
+// Cache up to 100 recent probes to avoid redundant HEAD/ffprobe requests
+// This persists across requests in the same lambda/container instance
+const probeCache = new SimpleLRUCache<string, Promise<MediaProbeResult>>(100);
 
 export async function GET(req: NextRequest) {
     const url = req.nextUrl.searchParams.get('url');
@@ -14,11 +19,24 @@ export async function GET(req: NextRequest) {
     try {
         const { normalizedUrl } = normalizeMediaUrl(url);
 
-        // Assert that the source is actually media before probing.
-        // This also performs SSRF and LFI validation.
-        await assertMediaLikeSource(normalizedUrl, { signal: req.signal });
+        // Check cache first
+        let probePromise = probeCache.get(normalizedUrl);
 
-        const metadata = await probeMedia(normalizedUrl);
+        if (!probePromise) {
+            probePromise = (async () => {
+                // Assert that the source is actually media before probing.
+                // This also performs SSRF and LFI validation.
+                await assertMediaLikeSource(normalizedUrl, { signal: req.signal });
+                return probeMedia(normalizedUrl);
+            })();
+
+            probeCache.set(normalizedUrl, probePromise);
+
+            // If it fails, remove from cache so we can retry later
+            probePromise.catch(() => probeCache.delete(normalizedUrl));
+        }
+
+        const metadata = await probePromise;
 
         // Filter for audio tracks specifically for the frontend selector
         const audioTracks = metadata.tracks.filter(t => t.type === 'audio');
