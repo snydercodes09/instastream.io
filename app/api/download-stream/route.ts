@@ -2,14 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
-import { PassThrough } from 'stream';
+
+
+// Coalesce synchronous DB writes to avoid blocking the event loop
+const pendingUpdates = new Map<number, { status: string; downloaded: number }>();
+let updateScheduled = false;
+
+const updateStmt = db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?');
+
+function flushUpdates() {
+    updateScheduled = false;
+    if (pendingUpdates.size === 0) return;
+
+    try {
+        const transaction = db.transaction((updates: Map<number, { status: string; downloaded: number }>) => {
+            for (const [id, { status, downloaded }] of updates.entries()) {
+                updateStmt.run(status, downloaded, id);
+            }
+        });
+        transaction(pendingUpdates);
+    } catch (err) {
+        console.error('DB Batch Update Error:', err);
+    } finally {
+        pendingUpdates.clear();
+    }
+}
 
 // Helper to update DB status
 function updateStatus(id: number, status: string, downloaded: number) {
-    try {
-        db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?').run(status, downloaded, id);
-    } catch (e) {
-        console.error('DB Update Error:', e);
+    pendingUpdates.set(id, { status, downloaded });
+    if (!updateScheduled) {
+        updateScheduled = true;
+        setImmediate(flushUpdates);
     }
 }
 
@@ -104,7 +128,6 @@ export async function GET(req: NextRequest) {
         // Instead, we use Node.js PassThrough if possible, or just read chunks and write to both.
 
         const fileStream = fs.createWriteStream(video.filepath);
-        const passThrough = new PassThrough();
 
         // Convert web stream to node stream to use .pipe()? 
         // Or manually read reader and write to both. Manual is safer for edge environment compat (though we are nodejs here).
