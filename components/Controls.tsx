@@ -535,4 +535,14 @@ const Controls: React.FC<ControlsProps> = ({
     );
 };
 
-export default Controls;
+/**
+ * ⚡ Bolt Performance Optimization
+ *
+ * What: Wrapped Controls in React.memo
+ * Why: The parent KMPlayer updates state frequently (e.g. currentTime on every timeupdate event).
+ *      Without memoization, this entire controls component (and all its SVG icons/buttons)
+ *      re-renders on every single frame/tick of video playback.
+ * Impact: Significantly reduces React render cycle overhead during active video playback.
+ *         Only re-renders when actual control props change, saving CPU and improving battery life.
+ */
+export default React.memo(Controls);
