@@ -1,5 +1,4 @@
 const MAX_QUEUE_SIZE = 50;
-const BACKPRESSURE_POLL_INTERVAL = 50;
 
 export class VideoBufferManager {
     private mediaSource: MediaSource;
@@ -8,6 +7,7 @@ export class VideoBufferManager {
     private isUpdating = false;
     private mimeType: string;
     private getCurrentTime: () => number;
+    private drainResolve: (() => void) | null = null;
 
     constructor(getCurrentTime: () => number, mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"') {
         this.getCurrentTime = getCurrentTime;
@@ -59,6 +59,13 @@ export class VideoBufferManager {
         if (!this.sourceBuffer || this.isUpdating || this.queue.length === 0) return;
 
         const data = this.queue.shift();
+
+        // If queue drained enough, resume fetching
+        if (this.queue.length <= MAX_QUEUE_SIZE && this.drainResolve) {
+            this.drainResolve();
+            this.drainResolve = null;
+        }
+
         if (data) {
             try {
                 this.isUpdating = true;
@@ -192,6 +199,27 @@ export class VideoBufferManager {
 
     private abortController: AbortController | null = null;
 
+    private waitForDrain(signal: AbortSignal): Promise<void> {
+        return new Promise<void>((resolve) => {
+            if (signal.aborted) {
+                resolve();
+                return;
+            }
+
+            const onAbort = () => {
+                this.drainResolve = null;
+                resolve();
+            };
+
+            this.drainResolve = () => {
+                signal.removeEventListener('abort', onAbort);
+                resolve();
+            };
+
+            signal.addEventListener('abort', onAbort, { once: true });
+        });
+    }
+
     public async startFetching(url: string) {
         this.stopFetching();
         this.abortController = new AbortController();
@@ -210,7 +238,7 @@ export class VideoBufferManager {
                 // Backpressure: pause reading if queue is too large
                 while (this.queue.length > MAX_QUEUE_SIZE) {
                     if (signal.aborted) break;
-                    await new Promise((resolve) => setTimeout(resolve, BACKPRESSURE_POLL_INTERVAL));
+                    await this.waitForDrain(signal);
                 }
                 if (signal.aborted) break;
 
@@ -236,6 +264,10 @@ export class VideoBufferManager {
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
+        }
+        if (this.drainResolve) {
+            this.drainResolve();
+            this.drainResolve = null;
         }
     }
 }
