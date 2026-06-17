@@ -356,4 +356,85 @@ describe("VideoBufferManager", () => {
 
         expect(sb.removeMock).toHaveBeenCalledWith(130, 200);
     });
+
+    it("should pause fetching when queue is full and resume when drained", async () => {
+        manager = new VideoBufferManager(mockGetCurrentTime);
+        const ms = getMediaSource(manager);
+        ms.readyState = "open";
+        ms.trigger('sourceopen');
+
+        const sb = (manager as any).sourceBuffer as MockSourceBuffer;
+        sb.updating = false;
+
+        let readCallCount = 0;
+        const totalChunks = 100; // Enough to exceed limit
+
+        // Mock a readable stream
+        const stream = new ReadableStream({
+            async pull(controller) {
+                readCallCount++;
+                if (readCallCount > totalChunks) {
+                    controller.close();
+                    return;
+                }
+                controller.enqueue(new Uint8Array([readCallCount]));
+                // Small delay to allow microtasks (promises) to resolve
+                await new Promise(r => setTimeout(r, 0));
+            }
+        });
+
+        const originalFetch = global.fetch;
+        global.fetch = mock(() => Promise.resolve(new Response(stream)));
+
+        try {
+            void manager.startFetching("http://test.com");
+
+            // Wait enough time for the queue to fill up
+            // MAX_QUEUE_SIZE is 50.
+            // Loop: check >= 50.
+            // It reads 1, appends 1.
+            // 1st append triggers processQueue -> shift -> isUpdating=true. Queue size 0.
+            // 2nd append -> queue size 1.
+            // ...
+            // 51st append -> queue size 50.
+            // 52nd check -> queue size 50 -> wait.
+            // So we expect 51 reads.
+
+            await new Promise(r => setTimeout(r, 200));
+
+            const queue = (manager as any).queue;
+            expect(queue.length).toBe(50);
+            // Allow for some pre-fetching by ReadableStream (it might pull one ahead)
+            expect(readCallCount).toBeGreaterThanOrEqual(51);
+            expect(readCallCount).toBeLessThanOrEqual(55);
+
+            const stalledCount = readCallCount;
+
+            // Verify it stays paused
+            await new Promise(r => setTimeout(r, 100));
+            expect(readCallCount).toBe(stalledCount);
+
+            // Now drain one item (simulate SourceBuffer update end)
+            sb.updating = false;
+            sb.trigger('updateend');
+            // processQueue runs:
+            // 1. shifts item (q=49)
+            // 2. notifies waiter
+            // 3. sets updating=true
+
+            // Waiter wakes up:
+            // Loop continues: read next chunk
+            // append (q=50)
+            // Loop checks >= 50 -> wait
+
+            await new Promise(r => setTimeout(r, 100));
+
+            expect(queue.length).toBe(50);
+            expect(readCallCount).toBeGreaterThan(stalledCount);
+
+        } finally {
+            manager.stopFetching();
+            global.fetch = originalFetch;
+        }
+    });
 });
