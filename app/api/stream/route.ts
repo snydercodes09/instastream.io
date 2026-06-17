@@ -4,11 +4,17 @@ import {
   assertMediaLikeSource,
   MediaValidationError,
   normalizeMediaUrl,
+  type MediaProbeResult,
 } from "@/utils/mediaUrl";
 import { fetchUpstreamWithRedirects } from "@/utils/upstreamFetch";
+import { SimpleLRUCache } from "@/utils/lruCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+// Cache validation promises to prevent redundant upstream checks
+// Exported for testing purposes
+export const _validationCache = new SimpleLRUCache<string, Promise<MediaProbeResult>>(100);
 
 type ErrorBody = {
   code: string;
@@ -49,7 +55,21 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    await assertMediaLikeSource(normalizedUrl, { signal: req.signal });
+    let validationPromise = _validationCache.get(normalizedUrl);
+
+    if (!validationPromise) {
+      // Do not pass req.signal to decouple validation from client request lifetime
+      // assertMediaLikeSource handles its own timeout (default 10s)
+      validationPromise = assertMediaLikeSource(normalizedUrl)
+        .catch((error) => {
+          // If validation fails, remove from cache so next request can retry
+          _validationCache.delete(normalizedUrl);
+          throw error;
+        });
+      _validationCache.set(normalizedUrl, validationPromise);
+    }
+
+    await validationPromise;
   } catch (error: unknown) {
     if (error instanceof MediaValidationError) {
       return jsonError(error.status, {

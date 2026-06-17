@@ -42,6 +42,7 @@ class NextRequest extends Request {
 }
 
 class NextResponse extends Response {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static json(body: any, init?: ResponseInit) {
     return new NextResponse(JSON.stringify(body), {
       ...init,
@@ -59,7 +60,7 @@ mock.module("next/server", () => ({
 }));
 
 // Import the handler dynamically to apply mocks
-const { GET } = await import("./route");
+const { GET, _validationCache } = await import("./route");
 
 // --- Tests ---
 
@@ -68,6 +69,7 @@ describe("GET /api/stream", () => {
     mockNormalizeMediaUrl.mockReset();
     mockAssertMediaLikeSource.mockReset();
     mockFetchUpstreamWithRedirects.mockReset();
+    _validationCache.clear();
   });
 
   test("returns 400 if url param is missing", async () => {
@@ -218,5 +220,53 @@ describe("GET /api/stream", () => {
     expect(mockFetchUpstreamWithRedirects).toHaveBeenCalled();
     const args = mockFetchUpstreamWithRedirects.mock.calls[0];
     expect(args[1].range).toBe("bytes=0-10");
+  });
+
+  test("caches assertMediaLikeSource result for subsequent requests", async () => {
+    const normalizedUrl = "http://example.com/cached-video.mp4";
+    mockNormalizeMediaUrl.mockReturnValue({ normalizedUrl });
+    mockAssertMediaLikeSource.mockResolvedValue({});
+
+    const upstreamHeaders = new Headers();
+    upstreamHeaders.set("Content-Type", "video/mp4");
+    mockFetchUpstreamWithRedirects.mockImplementation(() => {
+      return Promise.resolve(new Response("data", { status: 200, headers: upstreamHeaders }));
+    });
+
+    const req1 = new NextRequest(`http://localhost/api/stream?url=${normalizedUrl}`);
+    const res1 = await GET(req1);
+    expect(res1.status).toBe(200);
+
+    const req2 = new NextRequest(`http://localhost/api/stream?url=${normalizedUrl}`);
+    const res2 = await GET(req2);
+    expect(res2.status).toBe(200);
+
+    // Should only be called once due to caching
+    expect(mockAssertMediaLikeSource).toHaveBeenCalledTimes(1);
+  });
+
+  test("removes from cache on validation error", async () => {
+    const normalizedUrl = "http://example.com/error-video.mp4";
+    mockNormalizeMediaUrl.mockReturnValue({ normalizedUrl });
+
+    // First call fails
+    mockAssertMediaLikeSource.mockRejectedValueOnce(new MediaValidationError("UPSTREAM_TIMEOUT", "Timeout", 504));
+
+    const req1 = new NextRequest(`http://localhost/api/stream?url=${normalizedUrl}`);
+    const res1 = await GET(req1);
+    expect(res1.status).toBe(504);
+
+    // Second call succeeds (should retry)
+    mockAssertMediaLikeSource.mockResolvedValueOnce({});
+    const upstreamHeaders = new Headers();
+    upstreamHeaders.set("Content-Type", "video/mp4");
+    mockFetchUpstreamWithRedirects.mockResolvedValue(new Response("data", { status: 200, headers: upstreamHeaders }));
+
+    const req2 = new NextRequest(`http://localhost/api/stream?url=${normalizedUrl}`);
+    const res2 = await GET(req2);
+    expect(res2.status).toBe(200);
+
+    // Should be called twice because the first one failed and was evicted
+    expect(mockAssertMediaLikeSource).toHaveBeenCalledTimes(2);
   });
 });
