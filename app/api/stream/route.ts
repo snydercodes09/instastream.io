@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   assertMediaLikeSource,
+  MediaProbeResult,
   MediaValidationError,
   normalizeMediaUrl,
 } from "@/utils/mediaUrl";
+import { SimpleLRUCache } from "@/utils/lruCache";
 import { fetchUpstreamWithRedirects } from "@/utils/upstreamFetch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const validationCache = new SimpleLRUCache<string, Promise<MediaProbeResult>>(100);
 
 type ErrorBody = {
   code: string;
@@ -49,7 +53,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    await assertMediaLikeSource(normalizedUrl, { signal: req.signal });
+    let validationPromise = validationCache.get(normalizedUrl);
+    if (!validationPromise) {
+      validationPromise = assertMediaLikeSource(normalizedUrl, { timeoutMs: 10_000 });
+      validationPromise.catch(() => validationCache.delete(normalizedUrl));
+      validationCache.set(normalizedUrl, validationPromise);
+    }
+    await validationPromise;
   } catch (error: unknown) {
     if (error instanceof MediaValidationError) {
       return jsonError(error.status, {
