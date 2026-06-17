@@ -1,0 +1,3 @@
+## 2024-05-18 - [Caching Upstream Validation in Proxy/Transcode Pipelines]
+**Learning:** `assertMediaLikeSource` probes the first 1024 bytes of the upstream stream to validate content. This introduces significant latency (e.g. timeout of 10 seconds), particularly when `media-info`, proxying, and transcoding sequentially probe the identical stream.
+**Action:** Implemented a short-lived (5 minute TTL), LRU-style Map cache for successful media validations to bypass redundant `fetchUpstreamWithRedirects` calls. Added `clearMediaValidationCache` to manage global test states. When creating validation layers, consider upstream roundtrip overhead and aggressively memoize successful state requests.
