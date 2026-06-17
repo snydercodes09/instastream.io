@@ -72,19 +72,24 @@ export class VideoBufferManager {
                 if (e instanceof DOMException && e.name === 'QuotaExceededError') {
                     // Quota Hit! 
                     // 1. Try standard cleanup (prunes forward > 30s, keeps backward 300s)
-                    let freed = this.cleanupBuffer(300);
+                    let freed = this.cleanupBuffer(300, 30);
 
-                    // 2. If that failed, it means we don't have >30s forward buffer to prune.
-                    //    We must sacrifice backward buffer. Try keeping only 60s.
+                    // 2. If that failed, sacrifice backward buffer. Try keeping only 60s.
                     if (!freed) {
                         console.warn('Quota full, reducing backward buffer to 60s...');
-                        freed = this.cleanupBuffer(60);
+                        freed = this.cleanupBuffer(60, 20);
                     }
 
                     // 3. If still full, emergency prune: keep only 10s backward.
                     if (!freed) {
                         console.warn('Quota critical, reducing backward buffer to 10s...');
-                        freed = this.cleanupBuffer(10);
+                        freed = this.cleanupBuffer(10, 10);
+                    }
+
+                    // 4. If still full, super emergency prune: keep only 10s backward and 5s forward.
+                    if (!freed) {
+                        console.warn('Quota critical, reducing forward buffer to 5s...');
+                        freed = this.cleanupBuffer(10, 5);
                     }
 
                     if (freed) {
@@ -115,7 +120,7 @@ export class VideoBufferManager {
         this.processQueue();
     }
 
-    public cleanupBuffer(secondsToKeepBackward = 300): boolean {
+    public cleanupBuffer(secondsToKeepBackward = 300, maxForwardBuffer = 30): boolean {
         if (!this.sourceBuffer || this.isUpdating || this.mediaSource.readyState !== 'open') return false;
 
         try {
@@ -127,23 +132,21 @@ export class VideoBufferManager {
             //    This preserves the "rewind" capability (backward buffer) as the priority.
             // 2. If that doesn't free enough space or isn't applicable, THEN prune backward buffer.
 
-            const MAX_FORWARD_BUFFER = 30; // Keep at most 30s ahead to be safe
-
             // Phase 1: Forward Pruning (Sacrifice future for past)
             for (let i = 0; i < buffered.length; i++) {
                 const start = buffered.start(i);
                 const end = buffered.end(i);
 
                 // If range is entirely in future beyond safe limit
-                if (start > currentTime + MAX_FORWARD_BUFFER) {
+                if (start > currentTime + maxForwardBuffer) {
                     this.sourceBuffer.remove(start, end);
                     this.isUpdating = true;
                     return true;
                 }
 
                 // If range overlaps cursor but extends too far
-                if (start <= currentTime + MAX_FORWARD_BUFFER && end > currentTime + MAX_FORWARD_BUFFER) {
-                    this.sourceBuffer.remove(currentTime + MAX_FORWARD_BUFFER, end);
+                if (start <= currentTime + maxForwardBuffer && end > currentTime + maxForwardBuffer) {
+                    this.sourceBuffer.remove(currentTime + maxForwardBuffer, end);
                     this.isUpdating = true;
                     return true;
                 }
