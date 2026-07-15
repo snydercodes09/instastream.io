@@ -2,14 +2,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
-import { PassThrough } from 'stream';
 
-// Helper to update DB status
-function updateStatus(id: number, status: string, downloaded: number) {
+// Background DB queue for non-blocking I/O
+const dbQueue = new Map<number, { status: string; downloaded: number }>();
+let isDbQueueFlushing = false;
+
+// Pre-compile statement for performance
+const updateStmt = db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?');
+
+function flushDbQueue() {
+    if (dbQueue.size === 0) {
+        isDbQueueFlushing = false;
+        return;
+    }
     try {
-        db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?').run(status, downloaded, id);
+        const batch = db.transaction(() => {
+            for (const [id, data] of dbQueue.entries()) {
+                updateStmt.run(data.status, data.downloaded, id);
+            }
+        });
+        batch();
+        dbQueue.clear();
     } catch (e) {
-        console.error('DB Update Error:', e);
+        console.error('DB Update Batch Error:', e);
+    } finally {
+        isDbQueueFlushing = false;
+    }
+}
+
+function updateStatusAsync(id: number, status: string, downloaded: number) {
+    // Coalesce updates per video id
+    dbQueue.set(id, { status, downloaded });
+
+    // Schedule background flush if not already running
+    if (!isDbQueueFlushing) {
+        isDbQueueFlushing = true;
+        setImmediate(flushDbQueue);
     }
 }
 
@@ -104,7 +132,7 @@ export async function GET(req: NextRequest) {
         // Instead, we use Node.js PassThrough if possible, or just read chunks and write to both.
 
         const fileStream = fs.createWriteStream(video.filepath);
-        const passThrough = new PassThrough();
+        // const passThrough = new PassThrough();
 
         // Convert web stream to node stream to use .pipe()? 
         // Or manually read reader and write to both. Manual is safer for edge environment compat (though we are nodejs here).
@@ -121,18 +149,21 @@ export async function GET(req: NextRequest) {
                         const { done, value } = await reader.read();
                         if (done) {
                             fileStream.end();
-                            updateStatus(video!.id, 'completed', bytesWritten);
+                            updateStatusAsync(video!.id, 'completed', bytesWritten);
                             controller.close();
                             break;
                         }
 
                         // 1. Write to file
-                        fileStream.write(value);
+                        const canWrite = fileStream.write(value);
+                        if (!canWrite) {
+                            await new Promise((resolve) => fileStream.once('drain', resolve));
+                        }
                         bytesWritten += value.length;
 
                         // Throttle DB updates (every 1MB roughly?)
                         if (bytesWritten - lastUpdateBytes >= (1024 * 1024)) {
-                            updateStatus(video!.id, 'downloading', bytesWritten);
+                            updateStatusAsync(video!.id, 'downloading', bytesWritten);
                             lastUpdateBytes = bytesWritten;
                         }
 
@@ -142,7 +173,7 @@ export async function GET(req: NextRequest) {
                 } catch (err) {
                     console.error('Stream Error:', err);
                     fileStream.end();
-                    updateStatus(video!.id, 'error', bytesWritten);
+                    updateStatusAsync(video!.id, 'error', bytesWritten);
                     controller.error(err);
                 }
             },
@@ -154,7 +185,7 @@ export async function GET(req: NextRequest) {
                 reader.cancel();
                 fileStream.end();
                 // Mark as pending so we can maybe resume or restart later
-                updateStatus(video!.id, 'pending', bytesWritten);
+                updateStatusAsync(video!.id, 'pending', bytesWritten);
             }
         });
 
