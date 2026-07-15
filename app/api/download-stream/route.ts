@@ -3,12 +3,42 @@ import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
 
-// Helper to update DB status
-function updateStatus(id: number, status: string, downloaded: number) {
+
+// Background DB queue for non-blocking I/O
+const dbQueue = new Map<number, { status: string; downloaded: number }>();
+let isDbQueueFlushing = false;
+
+// Pre-compile statement for performance
+const updateStmt = db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?');
+
+function flushDbQueue() {
+    if (dbQueue.size === 0) {
+        isDbQueueFlushing = false;
+        return;
+    }
     try {
-        db.prepare('UPDATE videos SET status = ?, downloaded = ? WHERE id = ?').run(status, downloaded, id);
+        const batch = db.transaction(() => {
+            for (const [id, data] of dbQueue.entries()) {
+                updateStmt.run(data.status, data.downloaded, id);
+            }
+        });
+        batch();
+        dbQueue.clear();
     } catch (e) {
-        console.error('DB Update Error:', e);
+        console.error('DB Update Batch Error:', e);
+    } finally {
+        isDbQueueFlushing = false;
+    }
+}
+
+function updateStatusAsync(id: number, status: string, downloaded: number) {
+    // Coalesce updates per video id
+    dbQueue.set(id, { status, downloaded });
+
+    // Schedule background flush if not already running
+    if (!isDbQueueFlushing) {
+        isDbQueueFlushing = true;
+        setImmediate(flushDbQueue);
     }
 }
 
@@ -37,8 +67,7 @@ export async function GET(req: NextRequest) {
             const chunksize = (end - start) + 1;
             const file = fs.createReadStream(filePath, { start, end });
 
-            // @ts-expect-error - ReadableStream type mismatch
-            return new NextResponse(file, {
+            return new NextResponse(Readable.toWeb(file) as ReadableStream, {
                 status: 206,
                 headers: {
                     'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -49,8 +78,7 @@ export async function GET(req: NextRequest) {
             });
         } else {
             const file = fs.createReadStream(filePath);
-            // @ts-expect-error - ReadableStream type mismatch
-            return new NextResponse(file, {
+            return new NextResponse(Readable.toWeb(file) as ReadableStream, {
                 status: 200,
                 headers: {
                     'Content-Length': fileSize.toString(),
@@ -119,21 +147,19 @@ export async function GET(req: NextRequest) {
                         const { done, value } = await reader.read();
                         if (done) {
                             fileStream.end();
-                            updateStatus(video!.id, 'completed', bytesWritten);
+                            updateStatusAsync(video!.id, 'completed', bytesWritten);
                             controller.close();
                             break;
                         }
 
                         // 1. Write to file
-                        const canContinue = fileStream.write(value);
-                        if (!canContinue) {
-                            await new Promise(resolve => fileStream.once('drain', resolve));
+
                         }
                         bytesWritten += value.length;
 
                         // Throttle DB updates (every 1MB roughly?)
                         if (bytesWritten - lastUpdateBytes >= (1024 * 1024)) {
-                            updateStatus(video!.id, 'downloading', bytesWritten);
+                            updateStatusAsync(video!.id, 'downloading', bytesWritten);
                             lastUpdateBytes = bytesWritten;
                         }
 
@@ -143,7 +169,7 @@ export async function GET(req: NextRequest) {
                 } catch (err) {
                     console.error('Stream Error:', err);
                     fileStream.end();
-                    updateStatus(video!.id, 'error', bytesWritten);
+                    updateStatusAsync(video!.id, 'error', bytesWritten);
                     controller.error(err);
                 }
             },
@@ -151,11 +177,10 @@ export async function GET(req: NextRequest) {
                 // Client disconnected
                 // We MIGHT want to continue downloading in background?
                 // For now, let's stop to save bandwidth.
-                console.log('Client disconnected, stopping download.');
                 reader.cancel();
                 fileStream.end();
                 // Mark as pending so we can maybe resume or restart later
-                updateStatus(video!.id, 'pending', bytesWritten);
+                updateStatusAsync(video!.id, 'pending', bytesWritten);
             }
         });
 

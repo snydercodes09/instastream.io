@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 
 import { VideoBufferManager } from './mseBufferLogic';
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
@@ -76,7 +79,6 @@ describe('VideoBufferManager Memory Leak', () => {
         // Check queue size
         // @ts-ignore
         const queueSize = manager.queue.length;
-        console.log(`Queue size: ${queueSize}`);
 
         // Since we pushed 1000 chunks and SourceBuffer is "stuck" (we never fired updateend),
         // the first chunk might be "processing" (shifted).
