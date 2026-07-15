@@ -62,9 +62,8 @@ export class VideoBufferManager {
         if (data) {
             try {
                 this.isUpdating = true;
-                // Cast to any to avoid TS lib mismatch issues with Uint8Array/BufferSource
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                this.sourceBuffer.appendBuffer(data as any);
+                // Cast to BufferSource to avoid TS lib mismatch issues with Uint8Array/BufferSource
+                this.sourceBuffer.appendBuffer(data as BufferSource);
             } catch (e) {
                 console.error('Error appending buffer:', e);
                 this.isUpdating = false; // Reset if append fails synchronously
