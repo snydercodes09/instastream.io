@@ -153,9 +153,7 @@ export async function GET(req: NextRequest) {
                         }
 
                         // 1. Write to file
-                        const canWrite = fileStream.write(value);
-                        if (!canWrite) {
-                            await new Promise((resolve) => fileStream.once('drain', resolve));
+
                         }
                         bytesWritten += value.length;
 
