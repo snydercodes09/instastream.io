@@ -79,7 +79,6 @@ describe('VideoBufferManager Memory Leak', () => {
         // Check queue size
         // @ts-ignore
         const queueSize = manager.queue.length;
-        console.log(`Queue size: ${queueSize}`);
 
         // Since we pushed 1000 chunks and SourceBuffer is "stuck" (we never fired updateend),
         // the first chunk might be "processing" (shifted).
