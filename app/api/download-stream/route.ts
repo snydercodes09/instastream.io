@@ -3,6 +3,7 @@ import fs from 'fs';
 import db, { VideoRecord } from '@/db';
 import { StorageManager } from '@/utils/storage';
 
+
 // Background DB queue for non-blocking I/O
 const dbQueue = new Map<number, { status: string; downloaded: number }>();
 let isDbQueueFlushing = false;
@@ -66,8 +67,7 @@ export async function GET(req: NextRequest) {
             const chunksize = (end - start) + 1;
             const file = fs.createReadStream(filePath, { start, end });
 
-            // @ts-expect-error - ReadableStream type mismatch
-            return new NextResponse(file, {
+            return new NextResponse(Readable.toWeb(file) as ReadableStream, {
                 status: 206,
                 headers: {
                     'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -78,8 +78,7 @@ export async function GET(req: NextRequest) {
             });
         } else {
             const file = fs.createReadStream(filePath);
-            // @ts-expect-error - ReadableStream type mismatch
-            return new NextResponse(file, {
+            return new NextResponse(Readable.toWeb(file) as ReadableStream, {
                 status: 200,
                 headers: {
                     'Content-Length': fileSize.toString(),
